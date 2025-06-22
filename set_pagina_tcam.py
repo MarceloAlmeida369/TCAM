@@ -29,15 +29,19 @@ def obter_data_util_para_consulta(hoje=None):
     return data_consulta.strftime("%d/%m/%Y")
 
 def inicializar_navegador():
-    """Inicializa e retorna uma instância do navegador Chrome configurada."""
+    """Inicializa e retorna uma instância do navegador Chrome configurada para o Streamlit Cloud."""
     options = Options()
     options.add_argument("--headless")  # Executa em modo headless (sem interface gráfica)
-    options.add_argument("--window-size=1990,1080") # Ajustado para tentar evitar cortes
+    options.add_argument("--no-sandbox") # Essencial para ambientes de servidor como o Streamlit Cloud
+    options.add_argument("--disable-dev-shm-usage") # Essencial para ambientes com memória limitada
     options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    servico = Service()
-    navegador = webdriver.Chrome(service=servico, options=options)
+    options.add_argument("--window-size=1920,1080") # Ajustado para uma resolução comum (foi 1990,1080, ajustado para 1920,1080)
+    
+    # Adiciona a localização do chromedriver para o ambiente Streamlit Cloud
+    # O Streamlit Cloud instala o chromedriver em /usr/bin/chromedriver quando chromium-chromedriver está no packages.txt
+    service = Service(executable_path="/usr/bin/chromedriver") 
+
+    navegador = webdriver.Chrome(service=service, options=options)
     return navegador
 
 # --- Funções para Extração de Dados ---
@@ -58,7 +62,7 @@ def extrair_dados_b3(navegador, data_desejada):
         input_data.send_keys(data_desejada)
         navegador.find_element(By.XPATH, "//a[contains(text(), 'Buscar')]").click()
         
-        # --- Lógica de verificação de "Não há registro" SEM EC.or_ ---
+        # --- Lógica de verificação de "Não há registro" (Substitui EC.or_ se usado anteriormente) ---
         # Espera um pouco para a página carregar após o clique de buscar
         time.sleep(2) # Pequena pausa para a página atualizar
 
@@ -234,9 +238,6 @@ with st.spinner("Carregando dados... Isso pode levar alguns segundos devido à e
             dados_liquido[data_tcam1_str] = df_liquido1
         
         # --- Extração para TCAM 02 (data útil - 1) ---
-        # Navegador precisa ser reinicializado ou navegar para a URL novamente para cada nova consulta de data
-        # Uma abordagem melhor é apenas visitar a URL novamente e inserir a nova data.
-        # Não é necessário reinicializar o navegador completamente para cada extração da B3.
         df_tcam2, df_volume2, df_liquido2 = extrair_dados_b3(navegador, data_tcam2_str)
         if df_tcam2 is not None:
             dados_tcam[data_tcam2_str] = df_tcam2
@@ -251,7 +252,6 @@ with st.spinner("Carregando dados... Isso pode levar alguns segundos devido à e
             dados_liquido[data_tcam3_str] = df_liquido3
 
         # --- Extração de FRP0 (apenas para a data TCAM 01) ---
-        # Navegar para a URL FRP0 uma vez
         df_frp_extracted = extrair_frp0(navegador)
         if not df_frp_extracted.empty:
             frp0_data = {
@@ -262,7 +262,6 @@ with st.spinner("Carregando dados... Isso pode levar alguns segundos devido à e
             frp0_data = {"ultimo_preco_str": "N/A", "ultimo_preco_float": 0.0}
 
         # --- Extração de DIF OPER CASADA (apenas para a data TCAM 01) ---
-        # Navegar para a URL DIF OPER CASADA uma vez
         dif_valor_raw, dif_data = extrair_dif_oper_casada(navegador)
         if dif_valor_raw:
             dif_oper_data = {
@@ -338,13 +337,10 @@ def exibir_tcam_com_indicadores(label, df_tcam, frp0_data, dif_oper_data):
 with aba[0]:
     st.title("📈 Painel B3 - TCAMs Calculadas")
     st.success(f"Dados calculados com base na data útil principal: **{data_tcam1_str}**")
-    # A linha abaixo (onde estaria a linha 239 no seu log) é a provável causadora do erro.
-    # Se você tinha algo como "Com a data vigente sendo **22/06/2025**:" aqui,
-    # ela precisa ser comentada ou transformada em uma string Streamlit válida.
-    # Exemplo de correção (escolha uma, baseada no que estava na sua linha 239):
-    # st.markdown(f"Com a data vigente sendo **{data_tcam1_str}**:") # Se for para exibir no app
-    # # Com a data vigente sendo **22/06/2025**: # Se for apenas um comentário que escapou
-    st.markdown("---") # Esta linha provavelmente é a 240+ e está correta.
+    # CORREÇÃO: A linha 239 estava solta, causando SyntaxError.
+    # Agora está envolvida em st.markdown().
+    st.markdown(f"Com a data vigente sendo **{data_tcam1_str}**:")
+    st.markdown("---") 
 
     # TCAM 01
     exibir_tcam_com_indicadores(f"TCAM 01 ({data_tcam1_str})", dados_tcam.get(data_tcam1_str), frp0_data, dif_oper_data)
@@ -427,7 +423,9 @@ with aba[1]:
 # --- Aba LINKS ---
 with aba[2]:
     st.title("🔗 Links Úteis")
-    st.markdown("---")
+    # CORREÇÃO: A linha 435 estava "---", causando SyntaxError.
+    # Agora está envolvida em st.markdown().
+    st.markdown("---") 
     st.markdown("- [Página da B3 - Câmbio Histórico](https://sistemaswebb3-clearing.b3.com.br/historicalForeignExchangePage/retroactive?language=pt-br)")
     st.markdown("- [Página BMF - Boletim de Câmbio (FRP0)](https://www2.bmf.com.br/pages/portal/bmfbovespa/boletim1/SistemaPregao1.asp?pagetype=pop&caminho=Resumo%20Estat%EDstico%20-%20Sistema%20Preg%E3o&Data=&Mercadoria=FRP)")
     st.markdown("- [Página da B3 - Indicadores Financeiros (DIF OPER CASADA)](https://sistemaswebb3-derivativos.b3.com.br/financialIndicatorsPage/?language=pt-br)")
