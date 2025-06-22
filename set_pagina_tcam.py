@@ -44,22 +44,20 @@ def extrair_dados_b3_playwright(data_desejada):
             page = browser.new_page()
             page.set_default_timeout(60000) # Aumenta o timeout para 60 segundos
             
-            # st.info(f"Navegando para B3 Câmbio Histórico para a data: {data_desejada}...") # Removido st.info
-            page.goto(url_base, wait_until="domcontentloaded") # Espera o DOM carregar
+            # Navegando para B3 Câmbio Histórico
+            page.goto(url_base, wait_until="domcontentloaded")
 
             # Preencher o campo de data
             page.fill('input[name="initialDate"]', data_desejada)
             
             # Clicar no botão de busca
-            # st.info("Clicando no botão de busca...") # Removido st.info
             page.click('button:has-text("Buscar")')
 
             # Esperar a tabela carregar.
             try:
                 page.wait_for_selector("table#ratesTable", timeout=30000) # Espera a tabela TCAM aparecer
-                # st.success(f"Tabela 'ratesTable' carregada para {data_desejada}.") # Removido st.success
             except Exception as e:
-                # st.warning(f"Aviso: Tabela 'ratesTable' não apareceu após clique para {data_desejada}. Pode não haver dados ou a página demorou muito. Erro: {e}") # Removido st.warning
+                # Aviso interno (não exibido via st.warning aqui para evitar StreamlitAPIException)
                 browser.close()
                 return None, None, None
 
@@ -67,9 +65,9 @@ def extrair_dados_b3_playwright(data_desejada):
             content = page.content()
             soup = BeautifulSoup(content, "html.parser")
             
-            # Verificar a mensagem de "Não há registro" (Pode aparecer mesmo com Playwright)
+            # Verificar a mensagem de "Não há registro"
             if soup.find("div", string=lambda text: text and "Não há registro" in text):
-                st.warning(f"⚠️ Não há registro de dados da B3 para a data **{data_desejada}**.")
+                st.warning(f"⚠️ Não há registro de dados da B3 para a data **{data_desejada}**.") # Este st.warning está ok, pois está dentro da função de extração e não é chamada antes de set_page_config
                 browser.close()
                 return None, None, None
 
@@ -99,14 +97,8 @@ def extrair_dados_b3_playwright(data_desejada):
                         df_tcam = df_tcam.drop(columns=["Min Pregão", "Média Pregão", "Máx Pregão"]).rename(columns={
                             "Min Balcão": "Mínima", "Média Balcão": "Média", "Máx Balcão": "Máxima"
                         })
-                    # else: # Removido st.warning para não imprimir antes de set_page_config
-                    #     st.warning(f"Aviso: Nenhuma linha de dados válida encontrada na tabela TCAM para {data_desejada}.")
-                # else: # Removido st.warning
-                #     st.warning(f"Aviso: Nenhuma linha (<tr>) encontrada na tabela 'ratesTable' para {data_desejada}.")
-            # else: # Removido st.warning
-            #     st.warning(f"Aviso: Tabela 'ratesTable' não encontrada no HTML final para {data_desejada}.")
-
-
+                # Não há st.warning ou st.info aqui para evitar o problema de set_page_config
+            
             # Extrair Volume Contratado
             tabela_volume = soup.find("table", {"id": "contractedVolume"})
             df_volume = pd.DataFrame() 
@@ -135,14 +127,7 @@ def extrair_dados_b3_playwright(data_desejada):
                         colunas_volume = ["Data", "US$ Balcão", "R$ Balcão", "Negócios Balcão", "US$ Pregão", "R$ Pregão", "Negócios Pregão", "US$ Total", "R$ Total", "Negócios Total"]
                         if dados_volume and len(dados_volume[0]) == len(colunas_volume):
                             df_volume = pd.DataFrame(dados_volume, columns=colunas_volume)
-                        # else: # Removido st.warning
-                        #     st.warning(f"Aviso: Número de colunas inconsistente para Volume Contratado em {data_desejada}. Conteúdo: {dados_volume}")
-                        #     df_volume = pd.DataFrame(dados_volume)
-                    # else: # Removido st.warning
-                    #     st.warning(f"Aviso: Nenhuma linha de dados válida encontrada na tabela de Volume Contratado para {data_desejada}.")
-                # else: # Removido st.warning
-                #     st.warning(f"Aviso: Nenhuma linha (<tr>) encontrada na tabela 'contractedVolume' para {data_desejada}.")
-
+            
             # Extrair Valores Liquidados
             tabela_liquido = soup.find("table", {"id": "nettingTable"})
             df_liquido = pd.DataFrame() 
@@ -161,12 +146,8 @@ def extrair_dados_b3_playwright(data_desejada):
 
                     if dados_liquido:
                         df_liquido = pd.DataFrame(dados_liquido, columns=["Data", "US$", "R$"])
-                    # else: # Removido st.warning
-                    #     st.warning(f"Aviso: Nenhuma linha de dados válida encontrada na tabela de Valores Liquidados para {data_desejada}.")
-                # else: # Removido st.warning
-                #     st.warning(f"Aviso: Nenhuma linha (<tr>) encontrada na tabela 'nettingTable' para {data_desejada}.")
             
-            browser.close()
+            browser.close() # Fechar o navegador ao terminar
             
             if df_tcam is None or df_tcam.empty:
                 return None, None, None
@@ -192,14 +173,12 @@ def extrair_frp0_playwright():
             page = browser.new_page()
             page.set_default_timeout(30000)
             
-            # st.info("Navegando para BMF FRP0...") # Removido st.info
+            # Navegando para BMF FRP0
             page.goto(url_frp, wait_until="domcontentloaded")
             
             try:
                 page.wait_for_selector("#MercadoFut2", timeout=15000)
-                # st.success("Bloco 'MercadoFut2' do FRP0 carregado.") # Removido st.success
             except Exception as e:
-                # st.warning(f"Aviso: Bloco 'MercadoFut2' não apareceu para FRP0. Erro: {e}") # Removido st.warning
                 browser.close()
                 return pd.DataFrame()
 
@@ -208,13 +187,11 @@ def extrair_frp0_playwright():
             
             mercado2 = soup_frp.find(id="MercadoFut2")
             if not mercado2:
-                # st.error("❌ Erro: Bloco 'MercadoFut2' não encontrado para FRP0 após carregamento da página.") # Removido st.error
                 browser.close()
                 return pd.DataFrame()
                 
             frp2_tbl = mercado2.find("table", class_="tabConteudo")
             if not frp2_tbl:
-                # st.error("❌ Erro: Tabela 'tabConteudo' dentro de 'MercadoFut2' não encontrada para FRP0.") # Removido st.error
                 browser.close()
                 return pd.DataFrame()
 
@@ -230,12 +207,6 @@ def extrair_frp0_playwright():
                     ]
                     if len(valores) == len(colunas):
                         df_frp = pd.DataFrame([valores], columns=colunas)
-                    # else: # Removido st.warning
-                    #     st.warning(f"Aviso: Número de colunas para FRP0 inconsistente. Dados: {valores}")
-                # else: # Removido st.warning
-                #     st.warning("Aviso: Nenhuma célula de dados encontrada para FRP0 na linha esperada.")
-            # else: # Removido st.warning
-            #     st.warning("Aviso: Dados de FRP0 não encontrados na estrutura esperada (menos de 3 linhas na tabela).")
             
             browser.close()
             return df_frp
@@ -246,7 +217,6 @@ def extrair_frp0_playwright():
 def extrair_dif_oper_casada_playwright():
     """
     Extrai o indicador 'DIF OPER CASADA - COMPRA' usando Playwright.
-    Este é um dado que quase certamente é injetado dinamicamente.
     """
     url = "https://sistemaswebb3-derivativos.b3.com.br/financialIndicatorsPage/?language=pt-br"
     valor = None
@@ -257,14 +227,12 @@ def extrair_dif_oper_casada_playwright():
             page = browser.new_page()
             page.set_default_timeout(30000)
             
-            # st.info("Navegando para B3 Indicadores Financeiros (DIF OPER CASADA)...") # Removido st.info
+            # Navegando para B3 Indicadores Financeiros
             page.goto(url, wait_until="domcontentloaded")
             
             try:
                 page.wait_for_selector("p:has-text('DIF OPER CASADA - COMPRA')", timeout=20000)
-                # st.success("Indicador 'DIF OPER CASADA - COMPRA' encontrado no DOM.") # Removido st.success
             except Exception as e:
-                # st.warning(f"Aviso: Elemento 'DIF OPER CASADA - COMPRA' não apareceu na página. Erro: {e}") # Removido st.warning
                 browser.close()
                 return None, None
 
@@ -288,7 +256,7 @@ def extrair_dif_oper_casada_playwright():
         st.error(f"❌ Erro ao extrair DIF OPER CASADA com Playwright: {e}")
         return None, None
 
-# --- Funções de Formatação (Mantidas como estavam) ---
+# --- Funções de Formatação ---
 
 def tratar_valor_tcam_original(valor_str):
     """
@@ -452,8 +420,8 @@ def exibir_tcam_com_indicadores(label, df_tcam, frp0_data, dif_oper_data):
             "Soma (TCAM + DIF)": [
                 somar_formatar_original(fechamento_tcam, dif_oper_data["valor_float"]),
                 somar_formatar_original(minimo_tcam, dif_oper_data["valor_float"]),
-                somar_formatar_original(maximo_tcam, dif_oper_data["valor_float"]),
-                somar_formatar_original(maximo_tcam, dif_oper_data["valor_float"]) # Linha corrigida
+                somar_formatar_original(media_tcam, dif_oper_data["valor_float"]), # Corrigido: era maximo_tcam duas vezes
+                somar_formatar_original(maximo_tcam, dif_oper_data["valor_float"])
             ]
         })
         st.dataframe(df_resultado_dif, use_container_width=True, hide_index=True)
