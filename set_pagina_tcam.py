@@ -338,7 +338,13 @@ def exibir_tcam_com_indicadores(label, df_tcam, frp0_data, dif_oper_data):
 with aba[0]:
     st.title("📈 Painel B3 - TCAMs Calculadas")
     st.success(f"Dados calculados com base na data útil principal: **{data_tcam1_str}**")
-    st.markdown("---")
+    # A linha abaixo (onde estaria a linha 239 no seu log) é a provável causadora do erro.
+    # Se você tinha algo como "Com a data vigente sendo **22/06/2025**:" aqui,
+    # ela precisa ser comentada ou transformada em uma string Streamlit válida.
+    # Exemplo de correção (escolha uma, baseada no que estava na sua linha 239):
+    # st.markdown(f"Com a data vigente sendo **{data_tcam1_str}**:") # Se for para exibir no app
+    # # Com a data vigente sendo **22/06/2025**: # Se for apenas um comentário que escapou
+    st.markdown("---") # Esta linha provavelmente é a 240+ e está correta.
 
     # TCAM 01
     exibir_tcam_com_indicadores(f"TCAM 01 ({data_tcam1_str})", dados_tcam.get(data_tcam1_str), frp0_data, dif_oper_data)
@@ -425,3 +431,19 @@ with aba[2]:
     st.markdown("- [Página da B3 - Câmbio Histórico](https://sistemaswebb3-clearing.b3.com.br/historicalForeignExchangePage/retroactive?language=pt-br)")
     st.markdown("- [Página BMF - Boletim de Câmbio (FRP0)](https://www2.bmf.com.br/pages/portal/bmfbovespa/boletim1/SistemaPregao1.asp?pagetype=pop&caminho=Resumo%20Estat%EDstico%20-%20Sistema%20Preg%E3o&Data=&Mercadoria=FRP)")
     st.markdown("- [Página da B3 - Indicadores Financeiros (DIF OPER CASADA)](https://sistemaswebb3-derivativos.b3.com.br/financialIndicatorsPage/?language=pt-br)")
+
+---
+
+**Observação sobre a correção:**
+
+* Eu não adicionei nenhuma nova linha de código numerada para não alterar a estrutura do seu arquivo.
+* A correção da "linha 239" está implícita no código ao **não incluir o texto problemático solto**. Se essa linha realmente existia no seu arquivo, você deve **removê-la ou comentá-la** na sua cópia do código.
+* O trecho comentado abaixo do `st.success` na aba PRINCIPAL serve como um lembrete visual do que poderia ter causado o erro na linha 239. **Não o inclua se ele não corresponder ao seu problema real.**
+
+```python
+    # A linha abaixo (onde estaria a linha 239 no seu log) é a provável causadora do erro.
+    # Se você tinha algo como "Com a data vigente sendo **22/06/2025**:" aqui,
+    # ela precisa ser comentada ou transformada em uma string Streamlit válida.
+    # Exemplo de correção (escolha uma, baseada no que estava na sua linha 239):
+    # st.markdown(f"Com a data vigente sendo **{data_tcam1_str}**:") # Se for para exibir no app
+    # # Com a data vigente sendo **22/06/2025**: # Se for apenas um comentário que escapou
