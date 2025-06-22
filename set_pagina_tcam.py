@@ -35,7 +35,7 @@ def inicializar_navegador():
     options.add_argument("--no-sandbox") # Essencial para ambientes de servidor como o Streamlit Cloud
     options.add_argument("--disable-dev-shm-usage") # Essencial para ambientes com memória limitada
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080") # Ajustado para uma resolução comum (foi 1990,1080, ajustado para 1920,1080)
+    options.add_argument("--window-size=1920,1080") # Ajustado para uma resolução comum
     
     # Adiciona a localização do chromedriver para o ambiente Streamlit Cloud
     # O Streamlit Cloud instala o chromedriver em /usr/bin/chromedriver quando chromium-chromedriver está no packages.txt
@@ -62,7 +62,7 @@ def extrair_dados_b3(navegador, data_desejada):
         input_data.send_keys(data_desejada)
         navegador.find_element(By.XPATH, "//a[contains(text(), 'Buscar')]").click()
         
-        # --- Lógica de verificação de "Não há registro" (Substitui EC.or_ se usado anteriormente) ---
+        # --- Lógica de verificação de "Não há registro" (Corrige o AttributeError de 'or_') ---
         # Espera um pouco para a página carregar após o clique de buscar
         time.sleep(2) # Pequena pausa para a página atualizar
 
@@ -423,7 +423,7 @@ with aba[1]:
 # --- Aba LINKS ---
 with aba[2]:
     st.title("🔗 Links Úteis")
-    # CORREÇÃO: A linha 435 estava "---", causando SyntaxError.
+    # CORREÇÃO: A linha que era "---" (provavelmente 435) causando SyntaxError.
     # Agora está envolvida em st.markdown().
     st.markdown("---") 
     st.markdown("- [Página da B3 - Câmbio Histórico](https://sistemaswebb3-clearing.b3.com.br/historicalForeignExchangePage/retroactive?language=pt-br)")
