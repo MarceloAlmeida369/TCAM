@@ -1,10 +1,54 @@
 import streamlit as st
 from datetime import datetime, timedelta
-from playwright.sync_api import sync_playwright # Usaremos Playwright
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
 import time
+import subprocess
+import sys
+import os
+
+# --- Bloco de Verificação e Instalação do Playwright (NOVO) ---
+# Este bloco tenta garantir que os navegadores Playwright estejam instalados.
+# Ele será executado no início, antes de st.set_page_config.
+# Use um arquivo temporário para marcar se a instalação já foi tentada.
+
+PLAYWRIGHT_INSTALLED_FLAG = ".playwright_installed"
+
+if not os.path.exists(PLAYWRIGHT_INSTALLED_FLAG):
+    try:
+        # Tenta executar o comando de instalação do Playwright
+        # capture_output=True para não imprimir diretamente na saída padrão do Streamlit
+        # text=True para decodificar a saída como texto
+        # check=True para levantar uma exceção em caso de erro
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding='utf-8' # Adicionado encoding para lidar com caracteres especiais
+        )
+        # Se a instalação for bem-sucedida, cria o arquivo de flag
+        with open(PLAYWRIGHT_INSTALLED_FLAG, "w") as f:
+            f.write("ok")
+        print(f"Playwright install stdout: {result.stdout}") # Print para logs
+        print(f"Playwright install stderr: {result.stderr}") # Print para logs
+        print("Playwright Chromium instalado com sucesso via subprocess.")
+    except subprocess.CalledProcessError as e:
+        print(f"Erro ao instalar Playwright Chromium via subprocess: {e.stderr}")
+        # Considerar st.error aqui pode causar StreamlitAPIException se for antes de set_page_config
+        # Por isso, apenas printamos para os logs.
+    except Exception as e:
+        print(f"Erro inesperado durante a instalação do Playwright: {e}")
+        # A mesma consideração de st.error.
+# --- Fim do Bloco de Verificação e Instalação do Playwright ---
+
+
+# st.set_page_config deve ser a PRIMEIRA chamada Streamlit no seu script!
+st.set_page_config(layout="wide")
+
+# Resto do seu código permanece o mesmo...
 
 # --- Funções para Auxílio ---
 
@@ -67,7 +111,7 @@ def extrair_dados_b3_playwright(data_desejada):
             
             # Verificar a mensagem de "Não há registro"
             if soup.find("div", string=lambda text: text and "Não há registro" in text):
-                st.warning(f"⚠️ Não há registro de dados da B3 para a data **{data_desejada}**.") # Este st.warning está ok, pois está dentro da função de extração e não é chamada antes de set_page_config
+                st.warning(f"⚠️ Não há registro de dados da B3 para a data **{data_desejada}**.")
                 browser.close()
                 return None, None, None
 
@@ -97,7 +141,6 @@ def extrair_dados_b3_playwright(data_desejada):
                         df_tcam = df_tcam.drop(columns=["Min Pregão", "Média Pregão", "Máx Pregão"]).rename(columns={
                             "Min Balcão": "Mínima", "Média Balcão": "Média", "Máx Balcão": "Máxima"
                         })
-                # Não há st.warning ou st.info aqui para evitar o problema de set_page_config
             
             # Extrair Volume Contratado
             tabela_volume = soup.find("table", {"id": "contractedVolume"})
@@ -147,7 +190,7 @@ def extrair_dados_b3_playwright(data_desejada):
                     if dados_liquido:
                         df_liquido = pd.DataFrame(dados_liquido, columns=["Data", "US$", "R$"])
             
-            browser.close() # Fechar o navegador ao terminar
+            browser.close()
             
             if df_tcam is None or df_tcam.empty:
                 return None, None, None
@@ -322,7 +365,7 @@ with st.spinner("Carregando dados... Isso pode levar alguns segundos devido à e
     
     # --- Extração para TCAM 01 (data útil padrão) ---
     df_tcam1, df_volume1, df_liquido1 = extrair_dados_b3_playwright(data_tcam1_str)
-    if df_tcam1 is not None and not df_tcam1.empty: # Verifica se não é None e não está vazio
+    if df_tcam1 is not None and not df_tcam1.empty:
         dados_tcam[data_tcam1_str] = df_tcam1
         dados_volume[data_tcam1_str] = df_volume1
         dados_liquido[data_tcam1_str] = df_liquido1
@@ -420,7 +463,7 @@ def exibir_tcam_com_indicadores(label, df_tcam, frp0_data, dif_oper_data):
             "Soma (TCAM + DIF)": [
                 somar_formatar_original(fechamento_tcam, dif_oper_data["valor_float"]),
                 somar_formatar_original(minimo_tcam, dif_oper_data["valor_float"]),
-                somar_formatar_original(media_tcam, dif_oper_data["valor_float"]), # Corrigido: era maximo_tcam duas vezes
+                somar_formatar_original(media_tcam, dif_oper_data["valor_float"]),
                 somar_formatar_original(maximo_tcam, dif_oper_data["valor_float"])
             ]
         })
