@@ -1,14 +1,10 @@
 import streamlit as st
 from datetime import datetime, timedelta
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import requests # Usaremos requests para fazer as requisições HTTP
 from bs4 import BeautifulSoup
 import pandas as pd
-import time
+import re # Para expressões regulares, útil para extração sem Selenium
+import time # Ainda útil para pausas se necessário, mas menos crítico
 
 # --- Funções para Auxílio ---
 
@@ -28,55 +24,42 @@ def obter_data_util_para_consulta(hoje=None):
         data_consulta = hoje - timedelta(days=1)
     return data_consulta.strftime("%d/%m/%Y")
 
-def inicializar_navegador():
-    """Inicializa e retorna uma instância do navegador Chrome configurada para o Streamlit Cloud."""
-    options = Options()
-    options.add_argument("--headless")  # Executa em modo headless (sem interface gráfica)
-    options.add_argument("--no-sandbox") # Essencial para ambientes de servidor como o Streamlit Cloud
-    options.add_argument("--disable-dev-shm-usage") # Essencial para ambientes com memória limitada
-    options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080") # Ajustado para uma resolução comum
-    
-    # Adiciona a localização do chromedriver para o ambiente Streamlit Cloud
-    # O Streamlit Cloud instala o chromedriver em /usr/bin/chromedriver quando chromium-chromedriver está no packages.txt
-    service = Service(executable_path="/usr/bin/chromedriver") 
+# --- Funções para Extração de Dados (REESCRITAS para usar requests) ---
 
-    navegador = webdriver.Chrome(service=service, options=options)
-    return navegador
-
-# --- Funções para Extração de Dados ---
-
-def extrair_dados_b3(navegador, data_desejada):
+def extrair_dados_b3(data_desejada):
     """
-    Extrai taxas praticadas, volume contratado e valores liquidados da B3 para uma data específica.
+    Extrai taxas praticadas, volume contratado e valores liquidados da B3 para uma data específica
+    usando requests, simulando a submissão do formulário.
     Retorna (df_tcam, df_volume, df_liquido) ou (None, None, None) se não houver dados.
     """
-    url = "https://sistemaswebb3-clearing.b3.com.br/historicalForeignExchangePage/retroactive?language=pt-br"
-    navegador.get(url)
+    url_base = "https://sistemaswebb3-clearing.b3.com.br/historicalForeignExchangePage/retroactive?language=pt-br"
+    
+    # URL para onde o formulário é enviado. Pode ser a mesma URL base ou uma API interna.
+    # Baseado na inspeção de rede, parece ser um GET na mesma URL com parâmetros.
+    # Se fosse POST, precisaríamos descobrir os nomes dos campos do formulário.
+    
+    # A B3 usa GET para carregar a página e os dados.
+    # O parâmetro 'initialDate' é o que precisamos enviar.
+    params = {
+        'initialDate': data_desejada,
+        'language': 'pt-br'
+    }
     
     try:
-        WebDriverWait(navegador, 20).until(EC.presence_of_element_located((By.ID, "intialDate")))
-        navegador.execute_script("document.getElementById('intialDate').removeAttribute('readonly')")
-        input_data = navegador.find_element(By.ID, "intialDate")
-        input_data.clear()
-        input_data.send_keys(data_desejada)
-        navegador.find_element(By.XPATH, "//a[contains(text(), 'Buscar')]").click()
+        response = requests.get(url_base, params=params, timeout=10) # Adicionado timeout
+        response.raise_for_status() # Lança um erro para status HTTP ruins (4xx, 5xx)
         
-        # --- Lógica de verificação de "Não há registro" (Corrige o AttributeError de 'or_') ---
-        # Espera um pouco para a página carregar após o clique de buscar
-        time.sleep(2) # Pequena pausa para a página atualizar
+        soup = BeautifulSoup(response.content, "html.parser")
+        
+        # Verificar a mensagem de "Não há registro"
+        if soup.find("div", string=lambda text: text and "Não há registro" in text):
+            return None, None, None
 
-        # Verifica se a mensagem de "Não há registro" está visível
-        if navegador.find_elements(By.XPATH, "//div[contains(text(), 'Não há registro')]"):
-            return None, None, None # Retorna None se não houver dados
-            
-        # Tenta esperar pela tabela de taxas se a mensagem de "Não há registro" não apareceu
-        WebDriverWait(navegador, 10).until(EC.presence_of_element_located((By.ID, "ratesTable")))
-        
-        soup = BeautifulSoup(navegador.page_source, "html.parser")
-        
         # Extrair Taxas Praticadas (TCAM)
         tabela_tcam = soup.find("table", {"id": "ratesTable"})
+        if not tabela_tcam:
+            return None, None, None # Tabela não encontrada
+            
         linhas_tcam = tabela_tcam.find("tbody").find_all("tr")
         dados_tcam_str = [[td.text.strip() for td in linha.find_all("td")] for linha in linhas_tcam] 
         
@@ -93,42 +76,58 @@ def extrair_dados_b3(navegador, data_desejada):
 
         # Extrair Volume Contratado
         tabela_volume = soup.find("table", {"id": "contractedVolume"})
-        linhas_volume = tabela_volume.find("tbody").find_all("tr")
-        dados_volume = [[td.text.strip() for td in linha.find_all("td")] for linha in linhas_volume]
-        tfoot_volume = tabela_volume.find("tfoot")
-        if tfoot_volume:
-            total_row = [th.text.strip() for th in tfoot_volume.find_all("th")]
-            if total_row:
-                total_data = [total_row[0]] + total_row[1:]
-                dados_volume.append(total_data)
-        colunas_volume = ["Data", "US$ Balcão", "R$ Balcão", "Negócios Balcão", "US$ Pregão", "R$ Pregão", "Negócios Pregão", "US$ Total", "R$ Total", "Negócios Total"]
-        df_volume = pd.DataFrame(dados_volume, columns=colunas_volume)
+        df_volume = pd.DataFrame() # DataFrame vazio se não encontrar
+        if tabela_volume:
+            linhas_volume = tabela_volume.find("tbody").find_all("tr")
+            dados_volume = [[td.text.strip() for td in linha.find_all("td")] for linha in linhas_volume]
+            tfoot_volume = tabela_volume.find("tfoot")
+            if tfoot_volume:
+                total_row = [th.text.strip() for th in tfoot_volume.find_all("th")]
+                if total_row:
+                    total_data = [total_row[0]] + total_row[1:]
+                    dados_volume.append(total_data)
+            colunas_volume = ["Data", "US$ Balcão", "R$ Balcão", "Negócios Balcão", "US$ Pregão", "R$ Pregão", "Negócios Pregão", "US$ Total", "R$ Total", "Negócios Total"]
+            df_volume = pd.DataFrame(dados_volume, columns=colunas_volume)
 
         # Extrair Valores Liquidados
         tabela_liquido = soup.find("table", {"id": "nettingTable"})
-        linhas_liquido = tabela_liquido.find("tbody").find_all("tr")
-        dados_liquido = [[td.text.strip() for td in linha.find_all("td")] for linha in linhas_liquido]
-        df_liquido = pd.DataFrame(dados_liquido, columns=["Data", "US$", "R$"])
+        df_liquido = pd.DataFrame() # DataFrame vazio se não encontrar
+        if tabela_liquido:
+            linhas_liquido = tabela_liquido.find("tbody").find_all("tr")
+            dados_liquido = [[td.text.strip() for td in linha.find_all("td")] for linha in linhas_liquido]
+            df_liquido = pd.DataFrame(dados_liquido, columns=["Data", "US$", "R$"])
         
         return df_tcam, df_volume, df_liquido
 
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erro de requisição HTTP na B3 para {data_desejada}: {e}")
+        return None, None, None
     except Exception as e:
-        # st.error(f"Erro ao extrair dados da B3 para {data_desejada}: {e}") # Remover para não poluir o output com erros conhecidos
-        return None, None, None # Retorna None em caso de qualquer erro, como timeout se a tabela não aparecer
+        st.error(f"Erro ao extrair dados da B3 para {data_desejada}: {e}")
+        return None, None, None
 
-def extrair_frp0(navegador):
-    """Extrai dados do FRP0 (Forward Points) da BMF."""
+def extrair_frp0():
+    """Extrai dados do FRP0 (Forward Points) da BMF usando requests."""
     url_frp = (
         "https://www2.bmf.com.br/pages/portal/bmfbovespa/boletim1/"
         "SistemaPregao1.asp?pagetype=pop&caminho=Resumo%20Estat%EDstico%20-%20Sistema%20Preg%E3o"
         "&Data=&Mercadoria=FRP"
     )
-    navegador.get(url_frp)
     try:
-        WebDriverWait(navegador, 20).until(EC.presence_of_element_located((By.ID, "MercadoFut2")))
-        soup_frp = BeautifulSoup(navegador.page_source, "html.parser")
+        response = requests.get(url_frp, timeout=10)
+        response.raise_for_status()
+        soup_frp = BeautifulSoup(response.content, "html.parser")
+        
         mercado2 = soup_frp.find(id="MercadoFut2")
+        if not mercado2:
+            st.error("Erro: Tabela 'MercadoFut2' não encontrada para FRP0.")
+            return pd.DataFrame()
+            
         frp2_tbl = mercado2.find("table", class_="tabConteudo")
+        if not frp2_tbl:
+            st.error("Erro: Tabela 'tabConteudo' dentro de 'MercadoFut2' não encontrada para FRP0.")
+            return pd.DataFrame()
+
         rows = frp2_tbl.find_all("tr")
 
         if len(rows) >= 3:
@@ -140,31 +139,54 @@ def extrair_frp0(navegador):
             ]
             return pd.DataFrame([valores], columns=colunas)
         else:
+            st.warning("Aviso: Dados de FRP0 não encontrados na estrutura esperada.")
             return pd.DataFrame()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erro de requisição HTTP ao extrair FRP0: {e}")
+        return pd.DataFrame()
     except Exception as e:
-        # st.error(f"Erro ao extrair dados do FRP0: {e}")
+        st.error(f"Erro ao extrair dados do FRP0: {e}")
         return pd.DataFrame()
 
-def extrair_dif_oper_casada(navegador):
-    """Extrai o indicador 'DIF OPER CASADA - COMPRA'."""
+def extrair_dif_oper_casada():
+    """
+    Extrai o indicador 'DIF OPER CASADA - COMPRA' usando requests.
+    Este é o mais propenso a falhar sem JS, pois o valor pode ser injetado dinamicamente.
+    Tentaremos extrair de forma estática, mas pode não funcionar.
+    """
     url = "https://sistemaswebb3-derivativos.b3.com.br/financialIndicatorsPage/?language=pt-br"
-    navegador.get(url)
     try:
-        WebDriverWait(navegador, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "b3__text-caption"))) 
-        soup = BeautifulSoup(navegador.page_source, "html.parser")
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, "html.parser")
+        
+        # A B3 está usando React/JS para renderizar.
+        # A simples requisição HTTP GET não trará o conteúdo completo.
+        # Precisaríamos de uma API interna ou de uma biblioteca que execute JS.
+        # Por enquanto, esta função provavelmente retornará None, None.
+        
+        # Tentativa de extração se o conteúdo estivesse no HTML inicial:
         bloco = soup.find("p", string=lambda text: text and "DIF OPER CASADA - COMPRA" in text)
 
         if bloco:
             div_mae = bloco.find_parent("div")
-            valor = div_mae.find("h4").text.strip()
-            data_atualizacao = div_mae.find("small").text.strip()
-            return valor, data_atualizacao
+            if div_mae:
+                valor_tag = div_mae.find("h4")
+                data_tag = div_mae.find("small")
+                if valor_tag and data_tag:
+                    valor = valor_tag.text.strip()
+                    data_atualizacao = data_tag.text.strip()
+                    return valor, data_atualizacao
+        st.warning("Aviso: DIF OPER CASADA - COMPRA não encontrado no HTML estático. Este site provavelmente requer JavaScript para renderização completa.")
+        return None, None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erro de requisição HTTP ao extrair DIF OPER CASADA: {e}")
         return None, None
     except Exception as e:
-        # st.error(f"Erro ao extrair DIF OPER CASADA: {e}")
+        st.error(f"Erro ao extrair DIF OPER CASADA: {e}")
         return None, None
 
-# --- Funções de Formatação (Ajustadas conforme a lógica original) ---
+# --- Funções de Formatação (Mantidas como estavam) ---
 
 def tratar_valor_tcam_original(valor_str):
     """
@@ -228,52 +250,49 @@ frp0_data = {}
 dif_oper_data = {}
 
 with st.spinner("Carregando dados... Isso pode levar alguns segundos devido à extração web."):
-    navegador = inicializar_navegador()
-    try:
-        # --- Extração para TCAM 01 (data útil padrão) ---
-        df_tcam1, df_volume1, df_liquido1 = extrair_dados_b3(navegador, data_tcam1_str)
-        if df_tcam1 is not None:
-            dados_tcam[data_tcam1_str] = df_tcam1
-            dados_volume[data_tcam1_str] = df_volume1
-            dados_liquido[data_tcam1_str] = df_liquido1
-        
-        # --- Extração para TCAM 02 (data útil - 1) ---
-        df_tcam2, df_volume2, df_liquido2 = extrair_dados_b3(navegador, data_tcam2_str)
-        if df_tcam2 is not None:
-            dados_tcam[data_tcam2_str] = df_tcam2
-            dados_volume[data_tcam2_str] = df_volume2
-            dados_liquido[data_tcam2_str] = df_liquido2
+    # Não há navegador para inicializar ou fechar aqui.
+    
+    # --- Extração para TCAM 01 (data útil padrão) ---
+    df_tcam1, df_volume1, df_liquido1 = extrair_dados_b3(data_tcam1_str)
+    if df_tcam1 is not None:
+        dados_tcam[data_tcam1_str] = df_tcam1
+        dados_volume[data_tcam1_str] = df_volume1
+        dados_liquido[data_tcam1_str] = df_liquido1
+    
+    # --- Extração para TCAM 02 (data útil - 1) ---
+    df_tcam2, df_volume2, df_liquido2 = extrair_dados_b3(data_tcam2_str)
+    if df_tcam2 is not None:
+        dados_tcam[data_tcam2_str] = df_tcam2
+        dados_volume[data_tcam2_str] = df_volume2
+        dados_liquido[data_tcam2_str] = df_liquido2
 
-        # --- Extração para TCAM 03 (data útil - 2) ---
-        df_tcam3, df_volume3, df_liquido3 = extrair_dados_b3(navegador, data_tcam3_str)
-        if df_tcam3 is not None:
-            dados_tcam[data_tcam3_str] = df_tcam3
-            dados_volume[data_tcam3_str] = df_volume3
-            dados_liquido[data_tcam3_str] = df_liquido3
+    # --- Extração para TCAM 03 (data útil - 2) ---
+    df_tcam3, df_volume3, df_liquido3 = extrair_dados_b3(data_tcam3_str)
+    if df_tcam3 is not None:
+        dados_tcam[data_tcam3_str] = df_tcam3
+        dados_volume[data_tcam3_str] = df_volume3
+        dados_liquido[data_tcam3_str] = df_liquido3
 
-        # --- Extração de FRP0 (apenas para a data TCAM 01) ---
-        df_frp_extracted = extrair_frp0(navegador)
-        if not df_frp_extracted.empty:
-            frp0_data = {
-                "ultimo_preco_str": df_frp_extracted["Último Preço"].iloc[0],
-                "ultimo_preco_float": tratar_valor_frp0_dif_original(df_frp_extracted["Último Preço"].iloc[0])
-            }
-        else:
-            frp0_data = {"ultimo_preco_str": "N/A", "ultimo_preco_float": 0.0}
+    # --- Extração de FRP0 (apenas para a data TCAM 01) ---
+    df_frp_extracted = extrair_frp0()
+    if not df_frp_extracted.empty:
+        frp0_data = {
+            "ultimo_preco_str": df_frp_extracted["Último Preço"].iloc[0],
+            "ultimo_preco_float": tratar_valor_frp0_dif_original(df_frp_extracted["Último Preço"].iloc[0])
+        }
+    else:
+        frp0_data = {"ultimo_preco_str": "N/A", "ultimo_preco_float": 0.0}
 
-        # --- Extração de DIF OPER CASADA (apenas para a data TCAM 01) ---
-        dif_valor_raw, dif_data = extrair_dif_oper_casada(navegador)
-        if dif_valor_raw:
-            dif_oper_data = {
-                "valor_str": dif_valor_raw.split()[0],
-                "valor_float": tratar_valor_frp0_dif_original(dif_valor_raw.split()[0]),
-                "data_atualizacao": dif_data
-            }
-        else:
-            dif_oper_data = {"valor_str": "N/A", "valor_float": 0.0, "data_atualizacao": "N/A"}
-
-    finally:
-        navegador.quit() # Garante que o navegador seja fechado mesmo se ocorrer um erro
+    # --- Extração de DIF OPER CASADA (apenas para a data TCAM 01) ---
+    dif_valor_raw, dif_data = extrair_dif_oper_casada()
+    if dif_valor_raw:
+        dif_oper_data = {
+            "valor_str": dif_valor_raw.split()[0],
+            "valor_float": tratar_valor_frp0_dif_original(dif_valor_raw.split()[0]),
+            "data_atualizacao": dif_data
+        }
+    else:
+        dif_oper_data = {"valor_str": "N/A", "valor_float": 0.0, "data_atualizacao": "N/A"}
 
 
 # --- Funções para exibir tabela de TCAM + Indicadores ---
@@ -337,8 +356,6 @@ def exibir_tcam_com_indicadores(label, df_tcam, frp0_data, dif_oper_data):
 with aba[0]:
     st.title("📈 Painel B3 - TCAMs Calculadas")
     st.success(f"Dados calculados com base na data útil principal: **{data_tcam1_str}**")
-    # CORREÇÃO: A linha 239 estava solta, causando SyntaxError.
-    # Agora está envolvida em st.markdown().
     st.markdown(f"Com a data vigente sendo **{data_tcam1_str}**:")
     st.markdown("---") 
 
@@ -418,13 +435,11 @@ with aba[1]:
         st.metric(label="Valor Atual", value=dif_oper_data["valor_str"], delta=None)
         st.caption(f"Última atualização: {dif_oper_data['data_atualizacao']}")
     else:
-        st.error("❌ Indicador 'DIF OPER CASADA - COMPRA' não encontrado.")
+        st.error("❌ Indicador 'DIF OPER CASADA - COMPRA' não encontrado. Pode requerer JavaScript.")
 
 # --- Aba LINKS ---
 with aba[2]:
     st.title("🔗 Links Úteis")
-    # CORREÇÃO: A linha que era "---" (provavelmente 435) causando SyntaxError.
-    # Agora está envolvida em st.markdown().
     st.markdown("---") 
     st.markdown("- [Página da B3 - Câmbio Histórico](https://sistemaswebb3-clearing.b3.com.br/historicalForeignExchangePage/retroactive?language=pt-br)")
     st.markdown("- [Página BMF - Boletim de Câmbio (FRP0)](https://www2.bmf.com.br/pages/portal/bmfbovespa/boletim1/SistemaPregao1.asp?pagetype=pop&caminho=Resumo%20Estat%EDstico%20-%20Sistema%20Preg%E3o&Data=&Mercadoria=FRP)")
