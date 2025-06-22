@@ -20,11 +20,11 @@ Pygments==2.18.0
 python-dateutil==2.9.0.post0
 python-multipart==0.0.9
 pytz==2024.1
-requests==2.32.3
+requests==2.32.3 # Adicionado explicitamente
 rich==13.7.1
-selenium==4.22.0
+# selenium REMOVIDO!
 six==1.16.0
-snappy
+snappy # ou snappy>=2.0, ou snappy==3.2
 starlette==0.37.2
 streamlit==1.36.0
 tenacity==8.5.0
