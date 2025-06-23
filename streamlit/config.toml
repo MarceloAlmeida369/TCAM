@@ -1,2 +1,0 @@
-[server]
-post_install = "playwright install chromium"
